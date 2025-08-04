@@ -10,4 +10,3 @@ collections
 numpy
 sklearn.metrics
 time
-io
