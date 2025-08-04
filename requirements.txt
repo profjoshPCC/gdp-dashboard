@@ -1,3 +1,12 @@
 streamlit
 pandas
 re
+json
+matplotlib.pyplot
+seaborn
+plotly.express
+plotly.graph_objects
+collections
+numpy
+sklearn.metrics
+time
