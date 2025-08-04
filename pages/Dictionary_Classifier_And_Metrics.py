@@ -3,586 +3,347 @@ import pandas as pd
 import re
 import json
 import matplotlib.pyplot as plt
-import seaborn as sns
 import plotly.express as px
-import plotly.graph_objects as go
-from collections import Counter
 import numpy as np
-from sklearn.metrics import confusion_matrix, classification_report
 import time
 
 # Page configuration
 st.set_page_config(
-    page_title="Dictionary-Driven Text Classifier",
-    page_icon="🧠",
+    page_title="Dictionary Validation Tool",
+    page_icon="🎯",
     layout="wide"
 )
 
-# Initialize session state
-def init_session_state():
-    if 'dictionaries' not in st.session_state:
-        st.session_state.dictionaries = {
-            'urgency_marketing': [
-                'limited', 'limited time', 'limited run', 'limited edition', 'order now',
-                'last chance', 'hurry', 'while supplies last', 'before they\'re gone',
-                'selling out', 'selling fast', 'act now', 'don\'t wait', 'today only',
-                'expires soon', 'final hours', 'almost gone', 'flash sale', 'ending soon'
-            ],
-            'exclusive_marketing': [
-                'exclusive', 'exclusively', 'exclusive offer', 'exclusive deal',
-                'members only', 'vip', 'special access', 'invitation only',
-                'premium', 'privileged', 'limited access', 'select customers',
-                'insider', 'private sale', 'early access', 'elite', 'platinum'
-            ],
-            'classic_timeless_luxury': [
-                'heritage', 'timeless', 'craftsmanship', 'elegant', 'quality',
-                'premium', 'luxury', 'sophisticated', 'refined', 'artisan',
-                'tradition', 'excellence', 'masterpiece', 'prestige', 'distinguished',
-                'classic', 'enduring', 'authentic', 'exceptional', 'superior'
-            ]
-        }
-    
-    if 'current_tactic' not in st.session_state:
-        st.session_state.current_tactic = 'classic_timeless_luxury'
-    
-    if 'csv_data' not in st.session_state:
-        st.session_state.csv_data = None
-    
-    if 'predictions' not in st.session_state:
-        st.session_state.predictions = None
+# Initialize session state with simple defaults
+if 'keywords' not in st.session_state:
+    st.session_state.keywords = [
+        'limited', 'exclusive', 'premium', 'luxury', 'heritage',
+        'timeless', 'craftsmanship', 'elegant', 'quality'
+    ]
+
+if 'predictions' not in st.session_state:
+    st.session_state.predictions = None
 
 # Helper functions
-def classify_text(text, keywords, match_mode='exact'):
-    """Classify text based on keyword matches"""
+def classify_text(text, keywords):
+    """Simple exact match classification"""
     if pd.isna(text):
-        return {'count': 0, 'matches': []}
+        return 0, []
     
     text_lower = str(text).lower()
-    count = 0
     matched_keywords = []
     
     for keyword in keywords:
-        keyword_lower = keyword.lower()
-        
-        if match_mode == 'exact':
-            pattern = r'\b' + re.escape(keyword_lower) + r'\b'
-            matches = re.findall(pattern, text_lower)
-            count += len(matches)
-            if matches:
-                matched_keywords.extend([keyword] * len(matches))
-        elif match_mode == 'partial':
-            if keyword_lower in text_lower:
-                count += text_lower.count(keyword_lower)
-                matched_keywords.extend([keyword] * text_lower.count(keyword_lower))
-        elif match_mode == 'fuzzy':
-            words_in_text = text_lower.split()
-            for word in words_in_text:
-                if keyword_lower in word or word in keyword_lower:
-                    count += 1
-                    matched_keywords.append(keyword)
-                    break
+        if re.search(r'\b' + re.escape(keyword.lower()) + r'\b', text_lower):
+            matched_keywords.append(keyword)
     
-    return {'count': count, 'matches': matched_keywords}
+    return len(matched_keywords), matched_keywords
 
-def process_classification(df, text_column, ground_truth_column, keywords, match_mode='exact', threshold=0):
-    """Process the dataframe with classification"""
-    results = []
+def calculate_metrics(df):
+    """Calculate basic metrics"""
+    tp = len(df[(df['ground_truth'] == 1) & (df['prediction'] == 1)])
+    fp = len(df[(df['ground_truth'] == 0) & (df['prediction'] == 1)])
+    fn = len(df[(df['ground_truth'] == 1) & (df['prediction'] == 0)])
+    tn = len(df[(df['ground_truth'] == 0) & (df['prediction'] == 0)])
     
-    for idx, row in df.iterrows():
-        text = row[text_column]
-        ground_truth = int(row[ground_truth_column]) if pd.notna(row[ground_truth_column]) else 0
-        
-        classification_result = classify_text(text, keywords, match_mode)
-        prediction = 1 if classification_result['count'] > threshold else 0
-        
-        result = {
-            'id': idx,
-            'text': text,
-            'ground_truth': ground_truth,
-            'prediction': prediction,
-            'match_count': classification_result['count'],
-            'matched_keywords': classification_result['matches'],
-            'is_tp': ground_truth == 1 and prediction == 1,
-            'is_fp': ground_truth == 0 and prediction == 1,
-            'is_fn': ground_truth == 1 and prediction == 0,
-            'is_tn': ground_truth == 0 and prediction == 0
-        }
-        
-        results.append(result)
-    
-    return pd.DataFrame(results)
-
-def calculate_metrics(predictions_df):
-    """Calculate classification metrics"""
-    tp = len(predictions_df[predictions_df['is_tp']])
-    fp = len(predictions_df[predictions_df['is_fp']])
-    fn = len(predictions_df[predictions_df['is_fn']])
-    tn = len(predictions_df[predictions_df['is_tn']])
-    
-    accuracy = (tp + tn) / len(predictions_df) if len(predictions_df) > 0 else 0
+    accuracy = (tp + tn) / len(df) if len(df) > 0 else 0
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0
     f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
     
     return {
-        'accuracy': accuracy,
-        'precision': precision,
-        'recall': recall,
-        'f1': f1,
-        'tp': tp,
-        'fp': fp,
-        'fn': fn,
-        'tn': tn
+        'accuracy': accuracy * 100,
+        'precision': precision * 100,
+        'recall': recall * 100,
+        'f1': f1 * 100,
+        'tp': tp, 'fp': fp, 'fn': fn, 'tn': tn
     }
 
-def generate_mock_keywords(tactic, sample_texts):
-    """Generate mock keywords based on tactic (simulating AI generation)"""
-    time.sleep(2)  # Simulate processing time
-    
-    keyword_pools = {
-        'urgency_marketing': [
-            'urgent', 'immediate', 'now', 'quickly', 'fast', 'rush', 'deadline',
-            'limited time', 'expires', 'ends soon', 'last chance', 'hurry',
-            'don\'t wait', 'act now', 'while supplies last', 'running out'
-        ],
-        'exclusive_marketing': [
-            'exclusive', 'premium', 'vip', 'elite', 'special', 'private',
-            'members only', 'invitation only', 'select', 'privileged',
-            'luxury', 'high-end', 'boutique', 'bespoke', 'custom'
-        ],
-        'classic_timeless_luxury': [
-            'heritage', 'timeless', 'classic', 'traditional', 'elegant',
-            'sophisticated', 'refined', 'quality', 'craftsmanship', 'artisan',
-            'premium', 'luxury', 'prestige', 'distinguished', 'excellence'
-        ],
-        'discount_marketing': [
-            'sale', 'discount', 'off', 'save', 'deal', 'bargain', 'cheap',
-            'reduced', 'clearance', 'promotion', 'special price', 'markdown'
-        ]
-    }
-    
-    # Return relevant keywords or generate generic ones
-    if tactic.lower().replace(' ', '_') in keyword_pools:
-        return keyword_pools[tactic.lower().replace(' ', '_')]
-    else:
-        # Generate based on sample texts (mock analysis)
-        return ['quality', 'premium', 'excellent', 'professional', 'reliable']
+# Main app
+st.title("🎯 Dictionary Validation Tool")
+st.markdown("**Test your keyword dictionaries against ground truth labels**")
+st.markdown("---")
 
-def create_confusion_matrix_viz(predictions_df):
-    """Create confusion matrix visualization"""
-    y_true = predictions_df['ground_truth'].values
-    y_pred = predictions_df['prediction'].values
-    
-    cm = confusion_matrix(y_true, y_pred)
-    
-    fig = px.imshow(
-        cm,
-        text_auto=True,
-        aspect="auto",
-        labels=dict(x="Predicted", y="Actual", color="Count"),
-        x=['Negative', 'Positive'],
-        y=['Negative', 'Positive'],
-        title="Confusion Matrix"
-    )
-    
-    return fig
+# Quick start with sample data
+st.header("🚀 Quick Start")
+col1, col2 = st.columns([2, 1])
 
-def main():
-    init_session_state()
+with col1:
+    if st.button("📊 Load Sample Data", type="primary"):
+        # Create sample data
+        sample_data = {
+            'text': [
+                'Limited time offer - premium quality products at exclusive prices!',
+                'Regular everyday products for your home and office needs',
+                'Luxury heritage brand with timeless elegance and craftsmanship',
+                'Standard item available in our regular catalog',
+                'Exclusive members-only access to our premium collection',
+                'Basic functionality with standard features included',
+                'Elegant design meets superior quality in this luxury piece',
+                'Simple and affordable option for budget-conscious buyers'
+            ],
+            'ground_truth': [1, 0, 1, 0, 1, 0, 1, 0]
+        }
+        
+        st.session_state.sample_df = pd.DataFrame(sample_data)
+        st.success("✅ Sample data loaded!")
+
+with col2:
+    st.info("👈 Click to load sample data and see the tool in action!")
+
+# Data upload section
+st.header("📁 Upload Your Data")
+
+uploaded_file = st.file_uploader(
+    "Choose CSV file with 'text' and 'ground_truth' columns",
+    type=['csv'],
+    help="CSV should have a text column and a ground_truth column with 0/1 values"
+)
+
+# Use either uploaded file or sample data
+df = None
+if uploaded_file is not None:
+    try:
+        df = pd.read_csv(uploaded_file)
+        st.success(f"✅ File uploaded! {len(df)} rows loaded.")
+    except Exception as e:
+        st.error(f"Error reading file: {str(e)}")
+
+elif 'sample_df' in st.session_state:
+    df = st.session_state.sample_df
+    st.info("📊 Using sample data")
+
+# Main interface when data is available
+if df is not None:
+    # Column selection
+    st.subheader("🔧 Configure Columns")
+    col_sel1, col_sel2 = st.columns(2)
     
-    # Title and description
-    st.title("🧠 Dictionary-Driven Text Classifier")
-    st.markdown("**Build and validate keyword dictionaries against ground truth labels**")
+    with col_sel1:
+        text_columns = df.select_dtypes(include=['object']).columns.tolist()
+        text_column = st.selectbox("Text column:", text_columns, 
+                                  index=0 if 'text' in text_columns else 0)
+    
+    with col_sel2:
+        numeric_columns = df.columns.tolist()
+        gt_column = st.selectbox("Ground truth column:", numeric_columns,
+                               index=numeric_columns.index('ground_truth') if 'ground_truth' in numeric_columns else 0)
+    
+    # Show data preview
+    st.subheader("📋 Data Preview")
+    st.dataframe(df[[text_column, gt_column]].head(), use_container_width=True)
+    
+    # Show data stats
+    total_rows = len(df)
+    positive_cases = df[gt_column].sum()
+    negative_cases = total_rows - positive_cases
+    
+    stat_col1, stat_col2, stat_col3 = st.columns(3)
+    with stat_col1:
+        st.metric("Total Rows", total_rows)
+    with stat_col2:
+        st.metric("Positive Cases", positive_cases)
+    with stat_col3:
+        st.metric("Negative Cases", negative_cases)
+    
     st.markdown("---")
     
-    # Sidebar for settings
-    with st.sidebar:
-        st.header("⚙️ Classification Settings")
-        
-        match_mode = st.selectbox(
-            "Matching Mode:",
-            ['exact', 'partial', 'fuzzy'],
-            help="Exact: whole word matches only\nPartial: substring matches\nFuzzy: flexible matching"
-        )
-        
-        confidence_threshold = st.slider(
-            "Classification Threshold:",
-            0, 5, 0,
-            help="Minimum number of matches required to classify as positive"
-        )
-        
-        st.markdown("---")
-        st.header("📚 Dictionary Management")
-        
-        # Dictionary selection
-        selected_dict = st.selectbox(
-            "Active Dictionary:",
-            list(st.session_state.dictionaries.keys())
-        )
-        
-        st.session_state.current_tactic = selected_dict
-        
-        # Dictionary editing
-        if st.checkbox("Edit Dictionary"):
-            current_keywords = st.session_state.dictionaries[selected_dict]
-            keywords_text = '\n'.join(current_keywords)
-            
-            updated_keywords = st.text_area(
-                "Keywords (one per line):",
-                value=keywords_text,
-                height=200
-            )
-            
-            if st.button("Update Dictionary"):
-                new_keywords = [line.strip() for line in updated_keywords.split('\n') if line.strip()]
-                st.session_state.dictionaries[selected_dict] = new_keywords
-                st.success(f"Updated {selected_dict}!")
-                st.rerun()
+    # Dictionary management
+    st.header("📚 Manage Keywords")
     
-    # Main content area
-    col1, col2 = st.columns([2, 1])
+    col_dict1, col_dict2 = st.columns([2, 1])
     
-    with col1:
-        # Step 1: Define Tactic
-        st.header("1️⃣ Define Tactic")
-        tactic_description = st.text_area(
-            "Describe your classification tactic:",
-            value=f"{st.session_state.current_tactic}: language emphasizing the characteristics of this category",
-            height=100,
-            help="Describe what kind of language patterns you want to detect"
+    with col_dict1:
+        # Show current keywords
+        st.write("**Current Keywords:**")
+        keyword_text = '\n'.join(st.session_state.keywords)
+        
+        updated_keywords = st.text_area(
+            "Edit keywords (one per line):",
+            value=keyword_text,
+            height=150,
+            help="Add or remove keywords. Each keyword should be on a separate line."
         )
         
-        st.markdown("---")
+        if st.button("🔄 Update Keywords"):
+            new_keywords = [k.strip().lower() for k in updated_keywords.split('\n') if k.strip()]
+            st.session_state.keywords = new_keywords
+            st.success(f"✅ Updated! Now have {len(new_keywords)} keywords.")
+            st.rerun()
+    
+    with col_dict2:
+        st.metric("Total Keywords", len(st.session_state.keywords))
         
-        # Step 2: Upload Data
-        st.header("2️⃣ Upload & Inspect Data")
-        
-        uploaded_file = st.file_uploader(
-            "Choose a CSV file",
-            type=['csv'],
-            help="Upload a CSV file containing text data and ground truth labels"
-        )
-        
-        if uploaded_file is not None:
-            try:
-                df = pd.read_csv(uploaded_file)
-                st.session_state.csv_data = df
-                
-                st.success(f"✅ File uploaded successfully! Shape: {df.shape}")
-                
-                # Column selection
-                text_columns = df.select_dtypes(include=['object']).columns.tolist()
-                numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
-                
-                col_sel1, col_sel2 = st.columns(2)
-                
-                with col_sel1:
-                    text_column = st.selectbox(
-                        "Select text column:",
-                        text_columns,
-                        help="Column containing the text to classify"
-                    )
-                
-                with col_sel2:
-                    ground_truth_column = st.selectbox(
-                        "Select ground truth column:",
-                        numeric_columns,
-                        help="Column containing the true labels (0/1)"
-                    )
-                
-                # Preview data
-                if text_column and ground_truth_column:
-                    st.subheader("📋 Data Preview")
-                    preview_df = df[[text_column, ground_truth_column]].head()
-                    st.dataframe(preview_df, use_container_width=True)
-                    
-                    # Data statistics
-                    total_rows = len(df)
-                    positive_cases = df[ground_truth_column].sum()
-                    negative_cases = total_rows - positive_cases
-                    
-                    stat_col1, stat_col2, stat_col3 = st.columns(3)
-                    with stat_col1:
-                        st.metric("Total Rows", total_rows)
-                    with stat_col2:
-                        st.metric("Positive Cases", positive_cases)
-                    with stat_col3:
-                        st.metric("Negative Cases", negative_cases)
-                
-            except Exception as e:
-                st.error(f"Error reading file: {str(e)}")
-        
-        else:
-            # Show sample data format
-            st.info("👆 Upload a CSV file to get started!")
-            st.subheader("Expected Data Format")
-            sample_df = pd.DataFrame({
-                'ID': [1, 2, 3, 4],
-                'Statement': [
-                    'Limited time offer - act now! Get 50% off!',
-                    'Exclusive deal for VIP members only - premium access',
-                    'Regular product description with quality features',
-                    'Flash sale ending soon - don\'t miss out on this discount!'
-                ],
-                'ground_truth': [1, 1, 0, 1]
-            })
-            st.dataframe(sample_df, use_container_width=True)
-        
-        st.markdown("---")
-        
-        # Step 3: AI Generation
-        st.header("3️⃣ AI-Powered Keyword Generation")
-        
-        if st.button("🚀 Generate Keywords with AI", type="primary"):
-            if tactic_description and st.session_state.csv_data is not None:
-                with st.spinner("🤖 AI is analyzing your tactic and generating keywords..."):
-                    sample_texts = st.session_state.csv_data[text_column].dropna().head(10).tolist()
-                    new_keywords = generate_mock_keywords(tactic_description, sample_texts)
-                    
-                    # Update dictionary
-                    st.session_state.dictionaries[st.session_state.current_tactic] = new_keywords
-                    
-                st.success("✅ Keywords generated successfully!")
+        # Quick add keywords
+        new_keyword = st.text_input("Quick add keyword:")
+        if st.button("➕ Add") and new_keyword:
+            if new_keyword.lower() not in st.session_state.keywords:
+                st.session_state.keywords.append(new_keyword.lower())
+                st.success(f"Added '{new_keyword}'!")
                 st.rerun()
             else:
-                st.error("Please define a tactic and upload data first")
+                st.warning("Keyword already exists!")
     
-    with col2:
-        # Current Dictionary Display
-        st.header("📚 Current Dictionary")
-        st.subheader(f"{st.session_state.current_tactic}")
-        
-        current_keywords = st.session_state.dictionaries[st.session_state.current_tactic]
-        
-        # Show keywords in an expandable format
-        with st.expander(f"Keywords ({len(current_keywords)})", expanded=True):
-            for i, keyword in enumerate(current_keywords):
-                st.write(f"• {keyword}")
-        
-        # Add custom keywords
-        st.subheader("➕ Add Custom Keywords")
-        new_keywords = st.text_area(
-            "Enter keywords (one per line):",
-            height=100,
-            placeholder="Enter new keywords here..."
-        )
-        
-        if st.button("Add Keywords"):
-            if new_keywords.strip():
-                additional_keywords = [kw.strip() for kw in new_keywords.split('\n') if kw.strip()]
-                st.session_state.dictionaries[st.session_state.current_tactic].extend(additional_keywords)
-                st.success(f"Added {len(additional_keywords)} keywords!")
-                st.rerun()
-        
-        # Live coverage calculation
-        if st.session_state.csv_data is not None and 'text_column' in locals():
-            coverage_count = 0
-            total_count = len(st.session_state.csv_data)
-            
-            for text in st.session_state.csv_data[text_column].dropna():
-                result = classify_text(text, current_keywords, match_mode)
-                if result['count'] > 0:
-                    coverage_count += 1
-            
-            coverage_percentage = (coverage_count / total_count) * 100 if total_count > 0 else 0
-            
-            st.metric("Coverage", f"{coverage_percentage:.1f}%", 
-                     help=f"{coverage_count} out of {total_count} texts match at least one keyword")
+    st.markdown("---")
     
-    # Classification Section
-    if st.session_state.csv_data is not None and 'text_column' in locals() and 'ground_truth_column' in locals():
-        st.markdown("---")
-        st.header("4️⃣ Run Classification & Validation")
-        
-        col_class1, col_class2 = st.columns([1, 3])
-        
-        with col_class1:
-            if st.button("🎯 Classify Data", type="primary"):
-                with st.spinner("Processing classification..."):
-                    predictions_df = process_classification(
-                        st.session_state.csv_data,
-                        text_column,
-                        ground_truth_column,
-                        current_keywords,
-                        match_mode,
-                        confidence_threshold
-                    )
-                    st.session_state.predictions = predictions_df
-                
-                st.success("✅ Classification completed!")
-        
-        with col_class2:
-            if st.session_state.predictions is not None:
-                metrics = calculate_metrics(st.session_state.predictions)
-                
-                # Display metrics
-                metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
-                
-                with metric_col1:
-                    st.metric("Accuracy", f"{metrics['accuracy']:.2%}")
-                with metric_col2:
-                    st.metric("Precision", f"{metrics['precision']:.2%}")
-                with metric_col3:
-                    st.metric("Recall", f"{metrics['recall']:.2%}")
-                with metric_col4:
-                    st.metric("F1 Score", f"{metrics['f1']:.2%}")
+    # Classification
+    st.header("🎯 Run Classification")
     
-    # Results Analysis
+    threshold = st.slider("Classification threshold (min keywords to classify as positive):", 
+                         0, 5, 1, help="How many keywords need to match for a positive classification")
+    
+    if st.button("🚀 Classify All Texts", type="primary"):
+        with st.spinner("Classifying texts..."):
+            results = []
+            
+            for idx, row in df.iterrows():
+                text = row[text_column]
+                ground_truth = int(row[gt_column])
+                
+                match_count, matched_keywords = classify_text(text, st.session_state.keywords)
+                prediction = 1 if match_count >= threshold else 0
+                
+                results.append({
+                    'text': text,
+                    'ground_truth': ground_truth,
+                    'prediction': prediction,
+                    'match_count': match_count,
+                    'matched_keywords': ', '.join(matched_keywords),
+                    'correct': ground_truth == prediction
+                })
+            
+            st.session_state.predictions = pd.DataFrame(results)
+        
+        st.success("✅ Classification complete!")
+    
+    # Show results
     if st.session_state.predictions is not None:
-        st.markdown("---")
-        st.header("5️⃣ Results Analysis")
+        predictions_df = st.session_state.predictions
         
-        # Create tabs for different analyses
-        tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "🔍 Error Analysis", "📈 Visualizations", "💾 Export"])
+        st.markdown("---")
+        st.header("📊 Results")
+        
+        # Calculate and show metrics
+        metrics = calculate_metrics(predictions_df)
+        
+        metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+        with metric_col1:
+            st.metric("Accuracy", f"{metrics['accuracy']:.1f}%")
+        with metric_col2:
+            st.metric("Precision", f"{metrics['precision']:.1f}%")
+        with metric_col3:
+            st.metric("Recall", f"{metrics['recall']:.1f}%")
+        with metric_col4:
+            st.metric("F1 Score", f"{metrics['f1']:.1f}%")
+        
+        # Results tabs
+        tab1, tab2, tab3 = st.tabs(["📋 All Results", "❌ Errors", "📊 Analysis"])
         
         with tab1:
-            predictions_df = st.session_state.predictions
-            metrics = calculate_metrics(predictions_df)
+            # Show all predictions
+            display_df = predictions_df.copy()
+            display_df['Status'] = display_df['correct'].map({True: '✅ Correct', False: '❌ Wrong'})
             
-            # Confusion matrix values
-            col_cm1, col_cm2 = st.columns([1, 1])
+            st.dataframe(
+                display_df[['text', 'ground_truth', 'prediction', 'match_count', 'matched_keywords', 'Status']],
+                use_container_width=True
+            )
             
-            with col_cm1:
-                st.subheader("Confusion Matrix")
-                cm_data = pd.DataFrame([
-                    ['True Negative', 'False Positive'],
-                    ['False Negative', 'True Positive']
-                ], columns=['Predicted Negative', 'Predicted Positive'], 
-                   index=['Actual Negative', 'Actual Positive'])
-                
-                cm_values = pd.DataFrame([
-                    [metrics['tn'], metrics['fp']],
-                    [metrics['fn'], metrics['tp']]
-                ], columns=['Predicted Negative', 'Predicted Positive'], 
-                   index=['Actual Negative', 'Actual Positive'])
-                
-                st.dataframe(cm_values)
-            
-            with col_cm2:
-                st.subheader("Classification Report")
-                st.write(f"**Total Predictions:** {len(predictions_df)}")
-                st.write(f"**Correct Predictions:** {metrics['tp'] + metrics['tn']}")
-                st.write(f"**Incorrect Predictions:** {metrics['fp'] + metrics['fn']}")
-                st.write(f"**Baseline Accuracy:** {max(predictions_df['ground_truth'].sum(), len(predictions_df) - predictions_df['ground_truth'].sum()) / len(predictions_df):.2%}")
+            # Download button
+            csv = predictions_df.to_csv(index=False)
+            st.download_button(
+                "📥 Download Results CSV",
+                csv,
+                "classification_results.csv",
+                "text/csv"
+            )
         
         with tab2:
-            # Error Analysis
-            false_positives = predictions_df[predictions_df['is_fp']]
-            false_negatives = predictions_df[predictions_df['is_fn']]
+            # Show errors
+            errors_df = predictions_df[predictions_df['correct'] == False]
             
-            col_err1, col_err2 = st.columns(2)
-            
-            with col_err1:
-                st.subheader(f"❌ False Positives ({len(false_positives)})")
-                if len(false_positives) > 0:
-                    for idx, row in false_positives.head(5).iterrows():
-                        with st.expander(f"FP Example {idx + 1}"):
-                            st.write(f"**Text:** {row['text']}")
-                            st.write(f"**Matched Keywords:** {', '.join(row['matched_keywords'])}")
-                            st.write(f"**Match Count:** {row['match_count']}")
-            
-            with col_err2:
-                st.subheader(f"🔍 False Negatives ({len(false_negatives)})")
-                if len(false_negatives) > 0:
-                    for idx, row in false_negatives.head(5).iterrows():
-                        with st.expander(f"FN Example {idx + 1}"):
-                            st.write(f"**Text:** {row['text']}")
-                            st.write("**No keywords matched** - Consider adding relevant keywords")
+            if len(errors_df) > 0:
+                st.write(f"**Found {len(errors_df)} classification errors:**")
+                
+                for idx, row in errors_df.iterrows():
+                    error_type = "False Positive" if row['prediction'] == 1 else "False Negative"
+                    
+                    with st.expander(f"{error_type}: {row['text'][:50]}..."):
+                        st.write(f"**Text:** {row['text']}")
+                        st.write(f"**Ground Truth:** {row['ground_truth']}")
+                        st.write(f"**Prediction:** {row['prediction']}")
+                        st.write(f"**Matches:** {row['matched_keywords'] if row['matched_keywords'] else 'None'}")
+                        st.write(f"**Match Count:** {row['match_count']}")
+            else:
+                st.success("🎉 No classification errors! Perfect score!")
         
         with tab3:
-            # Visualizations
+            # Simple visualizations
             col_viz1, col_viz2 = st.columns(2)
             
             with col_viz1:
-                # Confusion matrix heatmap
-                fig_cm = create_confusion_matrix_viz(predictions_df)
-                st.plotly_chart(fig_cm, use_container_width=True)
+                # Confusion Matrix
+                st.subheader("Confusion Matrix")
+                cm_data = [
+                    [metrics['tn'], metrics['fp']],
+                    [metrics['fn'], metrics['tp']]
+                ]
+                
+                fig, ax = plt.subplots(figsize=(6, 4))
+                im = ax.imshow(cm_data, cmap='Blues')
+                
+                # Add text annotations
+                for i in range(2):
+                    for j in range(2):
+                        ax.text(j, i, cm_data[i][j], ha="center", va="center", fontsize=20)
+                
+                ax.set_xticks([0, 1])
+                ax.set_yticks([0, 1])
+                ax.set_xticklabels(['Predicted 0', 'Predicted 1'])
+                ax.set_yticklabels(['Actual 0', 'Actual 1'])
+                ax.set_title('Confusion Matrix')
+                
+                st.pyplot(fig)
             
             with col_viz2:
-                # Metrics comparison
+                # Metrics bar chart
+                st.subheader("Performance Metrics")
                 metrics_data = pd.DataFrame({
                     'Metric': ['Accuracy', 'Precision', 'Recall', 'F1 Score'],
                     'Score': [metrics['accuracy'], metrics['precision'], metrics['recall'], metrics['f1']]
                 })
                 
-                fig_metrics = px.bar(
-                    metrics_data, 
-                    x='Metric', 
-                    y='Score',
-                    title="Classification Metrics",
-                    color='Score',
-                    color_continuous_scale='viridis'
-                )
-                fig_metrics.update_layout(showlegend=False)
-                st.plotly_chart(fig_metrics, use_container_width=True)
-            
-            # Keyword impact analysis
-            st.subheader("🎯 Keyword Impact Analysis")
-            
-            keyword_stats = []
-            for keyword in current_keywords:
-                # Find texts that match this keyword
-                keyword_matches = predictions_df[
-                    predictions_df['matched_keywords'].apply(
-                        lambda x: keyword in x if isinstance(x, list) else False
-                    )
-                ]
-                
-                if len(keyword_matches) > 0:
-                    tp_count = len(keyword_matches[keyword_matches['is_tp']])
-                    fp_count = len(keyword_matches[keyword_matches['is_fp']])
-                    
-                    precision = tp_count / (tp_count + fp_count) if (tp_count + fp_count) > 0 else 0
-                    
-                    keyword_stats.append({
-                        'Keyword': keyword,
-                        'Total Matches': len(keyword_matches),
-                        'True Positives': tp_count,
-                        'False Positives': fp_count,
-                        'Precision': precision
-                    })
-            
-            if keyword_stats:
-                keyword_df = pd.DataFrame(keyword_stats)
-                keyword_df = keyword_df.sort_values('Precision', ascending=False)
-                st.dataframe(keyword_df, use_container_width=True)
-        
-        with tab4:
-            # Export options
-            st.subheader("📥 Download Results")
-            
-            col_exp1, col_exp2 = st.columns(2)
-            
-            with col_exp1:
-                # Download predictions
-                predictions_csv = predictions_df.to_csv(index=False)
-                st.download_button(
-                    label="📊 Download Predictions CSV",
-                    data=predictions_csv,
-                    file_name=f"predictions_{st.session_state.current_tactic}.csv",
-                    mime="text/csv"
-                )
-            
-            with col_exp2:
-                # Download dictionary
-                dictionary_json = json.dumps({
-                    'tactic': st.session_state.current_tactic,
-                    'keywords': current_keywords,
-                    'metrics': {
-                        'accuracy': float(metrics['accuracy']),
-                        'precision': float(metrics['precision']),
-                        'recall': float(metrics['recall']),
-                        'f1': float(metrics['f1'])
-                    },
-                    'created': pd.Timestamp.now().isoformat()
-                }, indent=2)
-                
-                st.download_button(
-                    label="📚 Download Dictionary JSON",
-                    data=dictionary_json,
-                    file_name=f"dictionary_{st.session_state.current_tactic}.json",
-                    mime="application/json"
-                )
+                fig = px.bar(metrics_data, x='Metric', y='Score', 
+                           title='Classification Performance',
+                           color='Score', color_continuous_scale='viridis')
+                fig.update_layout(showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
 
-if __name__ == "__main__":
-    main()
+else:
+    # Help section when no data is loaded
+    st.header("📖 How to Use")
+    st.markdown("""
+    1. **Quick Start**: Click "Load Sample Data" to try the tool immediately
+    2. **Upload Data**: Or upload your own CSV file with:
+       - A text column (containing the text to classify)
+       - A ground_truth column (with 0 for negative, 1 for positive)
+    3. **Manage Keywords**: Add or edit keywords for your classification
+    4. **Set Threshold**: Choose how many keyword matches = positive classification
+    5. **Classify**: Run the classification and see results
+    6. **Analyze**: Review metrics and errors to improve your keywords
+    """)
+    
+    st.subheader("📋 Example CSV Format")
+    example_df = pd.DataFrame({
+        'text': [
+            'Limited time premium offer!',
+            'Regular everyday product',
+            'Exclusive luxury item'
+        ],
+        'ground_truth': [1, 0, 1]
+    })
+    st.dataframe(example_df, use_container_width=True)
+
+# Footer
+st.markdown("---")
+st.markdown("Built with Streamlit • Dictionary Validation Tool")
