@@ -1,11 +1,6 @@
 streamlit
 pandas
-json
-matplotlib.pyplot
-seaborn
-plotly.express
-plotly.graph_objects
-collections
 numpy
-sklearn
-time
+matplotlib
+plotly
+scikit-learn
